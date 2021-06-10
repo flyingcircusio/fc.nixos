@@ -29,7 +29,7 @@ in
           A Letsencrypt certificate is generated for it.
           Defaults to the FE FQDN.
         '';
-        default = fclib.feFQDN;
+        default = fclib.fqdn "fe";
         example = "gitlab.test.fcio.net";
       };
 

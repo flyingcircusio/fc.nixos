@@ -145,7 +145,7 @@ in
     flyingcircus.roles.statshost = {
 
       hostName = mkOption {
-        default = fclib.feFQDN;
+        default = fclib.fqdn "fe";
         type = types.str;
         description = ''
           Host name for the Grafana frontend.

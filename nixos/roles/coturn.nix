@@ -51,7 +51,7 @@ in
 
       hostName = mkOption {
         type = types.str;
-        default = fclib.feFQDN;
+        default = fclib.fqdn "fe";
         description = ''
           Public host name for the TURN server.
           A Letsencrypt certificate is generated for it.

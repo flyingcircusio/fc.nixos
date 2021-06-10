@@ -21,7 +21,6 @@ rec {
     netmaskFromPrefixLength (prefixLength cidr);
 
   isIp4 = cidr: length (lib.splitString "." cidr) == 4;
-
   isIp6 = cidr: length (lib.splitString ":" cidr) > 1;
 
   # choose correct "iptables" invocation depending on the address
@@ -33,16 +32,11 @@ rec {
   # choose correct "ip" invocation depending on the address
   ip' = a: "ip " + (if isIp4 a then "-4" else if isIp6 a then "-6" else "");
 
-  feFQDN =
-    let
-      inherit (config.networking) domain hostName;
-      location =
-        lib.attrByPath
-          [ "parameters" "location" ]
-          "standalone"
-          config.flyingcircus.enc;
-    in
-      "${hostName}.fe.${location}.${domain}";
+  fqdn = {vlan,
+          domain ? config.networking.domain,
+          location ? lib.attrByPath [ "parameters" "location" ] "standalone" config.flyingcircus.enc,
+          }:
+      "${config.networking.hostName}.${vlan}.${location}.${domain}";
 
   # list IP addresses for service configuration (e.g. nginx)
   listenAddresses = iface:
@@ -60,9 +54,6 @@ rec {
       else [];
 
   quoteIPv6Address = addr: if isIp6 addr then "[${addr}]" else addr;
-
-  listenAddressesQuotedV6 =
-    iface: map quoteIPv6Address (listenAddresses iface);
 
   listServiceAddresses = service:
   (map
@@ -106,8 +97,6 @@ rec {
    * policy routing
    */
 
-  dev = vlan: bridged: if bridged then "br${vlan}" else "eth${vlan}";
-
   # VLANS with prio < 100 are generally routable to the outside.
   routingPriorities = {
     fe = 50;
@@ -120,38 +109,6 @@ rec {
     then routingPriorities.${vlan}
     else 100;
 
-  # transforms ENC "networks" data structure into an NixOS "interface" option
-  # for all nets that satisfy `pred`
-  # {
-  #   "172.30.3.0/24" = [ "172.30.3.66" ... ];
-  #   ...;
-  # }
-  # =>
-  # [ { address = "172.30.3.66"; prefixLength = "24"; } ... ];
-  ipAddressesOption = pred: networks:
-    let
-      transformAddrs = net: addrs:
-        map
-          (a: { address = a; prefixLength = prefixLength net; })
-          addrs;
-      relevantNetworks = lib.filterAttrs (net: val: pred net) networks;
-    in
-    lib.concatMap
-      (n: transformAddrs n networks.${n})
-      (attrNames relevantNetworks);
-
-  vlanMTU = vlan:
-      if hasAttr vlan config.flyingcircus.static.mtus
-      then config.flyingcircus.static.mtus.${vlan}
-      else 1500;
-
-  # ENC networks to NixOS option for both address families
-  interfaceConfig = networks: vlan:
-    { ipv4.addresses = ipAddressesOption isIp4 networks;
-      ipv6.addresses = ipAddressesOption isIp6 networks;
-      mtu = vlanMTU vlan;
-    };
-
   # Collects a complete list of configured addresses from all networks.
   # Each address is suffixed with the netmask from its network.
   allInterfaceAddresses = networks:
@@ -160,22 +117,6 @@ rec {
         let p = prefix net;
         in map (addr: addr + "/" + p) addrs;
     in lib.concatLists (lib.mapAttrsToList addrsWithNetmask networks);
-
-  # IP policy rules for a single VLAN.
-  # Expects a VLAN name and an ENC "interfaces" data structure. Expected keys:
-  # mac, networks, bridged, gateways.
-  ipRules = vlan: encInterface: filteredNets: verb:
-    let
-      prio = routingPriority vlan;
-      common = "table ${vlan} priority ${toString prio}";
-      fromRules = lib.concatMapStringsSep "\n"
-        (a: "${ip' a} rule ${verb} from ${a} ${common}")
-        (allInterfaceAddresses encInterface.networks);
-      toRules = lib.concatMapStringsSep "\n"
-        (n: "${ip' n} rule ${verb} to ${n} ${common}")
-        filteredNets;
-    in
-    "\n# policy rules for ${vlan}\n${fromRules}\n${toRules}\n";
 
   # A list of default gateways from a list of networks in CIDR form.
   gateways = encIface: filteredNets:
@@ -249,27 +190,6 @@ rec {
   # predicate present in the second argument.
   filterNetworks = encNetworks: predicates:
     lib.concatMap (networksWithAtLeastOneAddress encNetworks) predicates;
-
-  policyRouting =
-    { vlan
-    , encInterface
-    , action ? "start"  # or "stop"
-    , extraRoutes ? [ ]
-    }:
-    let
-      verb = if action == "start" then "add" else "del";
-      filteredNets = filterNetworks encInterface.networks [ isIp4 isIp6 ];
-    in
-    if action == "start"
-    then ''
-      ${ipRules vlan encInterface filteredNets verb}
-      ${ipRoutes vlan encInterface filteredNets verb}
-      ${ipExtraRoutes vlan extraRoutes verb}
-    '' else ''
-      ${ipExtraRoutes vlan extraRoutes verb}
-      ${ipRoutes vlan encInterface filteredNets verb}
-      ${ipRules vlan encInterface filteredNets verb}
-    '';
 
   simpleRouting =
     { vlan
@@ -382,5 +302,75 @@ rec {
       in
         fromNumber ((toNumber addr) / shiftAmount * shiftAmount) pfl;
   };
+
+  network = lib.mapAttrs'
+    (vlan: interface: 
+      lib.nameValuePair vlan (
+      let
+        priority = routingPriority vlan;
+        bridged = interface.bridged;
+
+        mtu = if hasAttr vlan config.flyingcircus.static.mtus
+              then config.flyingcircus.static.mtus.${vlan}
+              else 1500;
+      in with fclib; rec {
+
+        inherit vlan mtu priority bridged;
+
+        vlan_id = config.flyingcircus.static.vlan_ids.${vlan};
+
+        device = if bridged then bridged_device else physical_device;
+        attached_devices = if bridged then [physical_device] else [];
+        bridged_device = "br${vlan}";
+        physical_device = "eth${vlan}";
+
+        mac_fallback = "02:00:00:${fclib.byteToHex vlan_id}:??:??";
+        mac = lib.toLower
+                (lib.attrByPath [ "mac" ] mac_fallback interface);
+
+        policy = interface.policy;
+
+        dualstack = rec {
+          # Without netmask
+          addresses = map stripNetmask cidrs;
+          # Without netmask, V6 quoted in []
+          addresses_quoted = map quoteIPv6Address addresses;
+          # as cidr
+          cidrs = map (attr: "${attr.address}/${toString attr.prefixLength}") attrs;
+
+          # as attribute sets of address/prefixLength
+          attrs = lib.flatten (lib.mapAttrsToList
+            (network: addresses: 
+              let prefix = fclib.prefixLength network;
+              in (map (address: { address = address; prefixLength = prefix; }) addresses))
+            interface.networks);
+
+          default_gateways = lib.mapAttrsToList
+            (network: gateway: gateway)
+            (lib.filterAttrs (network: gateway:
+              (length interface.networks.${network} >= 1) &&
+              (priority < 100) && (isIp4 gateway))
+              interface.gateways);
+        };
+
+        v4 = {
+          addresses = filter isIp4 dualstack.addresses;
+          cidrs = filter isIp4 dualstack.addresses;
+          attrs = filter (attr: isIp4 attr.address) dualstack.attrs;
+          # Select default gateways for all networks that we have a local IP in
+          default_gateways = filter isIp4 dualstack.default_gateways;
+        };
+
+        v6 = {
+          addresses = filter isIp6 dualstack.addresses;
+          addresses_quoted = filter isIp6 dualstack.addresses_quoted;
+          cidrs = filter isIp6 dualstack.addresses;
+          attrs = filter (attr: isIp6 attr.address) dualstack.attrs;
+          # Select default gateways for all networks that we have a local IP in
+          default_gateways = filter isIp6 dualstack.default_gateways;
+        };
+
+      }))
+    (lib.attrByPath [ "parameters" "interfaces" ] {} config.flyingcircus.enc);
 
 }

@@ -27,7 +27,7 @@ in
       recommendedOptimisation = true;
       recommendedProxySettings = true;
       recommendedTlsSettings = true;
-      virtualHosts."${fclib.feFQDN}" = {
+      virtualHosts."${fclib.fqdn ''"fe''""}" = {
         serverAliases = [ "${config.networking.hostName}.${config.networking.domain}" ];
         enableACME = true;
         addSSL = true;

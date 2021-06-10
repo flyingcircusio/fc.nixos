@@ -32,9 +32,6 @@ in
       extnet = cfg.roles.external_net;
     in
     {
-      # does not interact well with old-style policy routing
-      flyingcircus.network.policyRouting.enable = lib.mkForce false;
-
       systemd.services."network-external-routing" = rec {
         description = "Custom routing rules for external networks";
         after = [ "network-routing-ethsrv.service" "firewall.service" ];
