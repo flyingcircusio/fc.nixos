@@ -78,6 +78,7 @@ import ./make-test-python.nix ({ version ? "" , tideways ? "", ... }:
 
       if php_version > 5:
         lamp.succeed("egrep 'curl.cainfo.*/etc/ssl/certs/ca-certificates.crt' result")
+        lamp.succeed("egrep 'MongoDB support => enabled' result")
 
       if tideways_api_key:
         lamp.succeed("egrep 'tideways' result")
@@ -117,6 +118,7 @@ import ./make-test-python.nix ({ version ? "" , tideways ? "", ... }:
 
       if php_version > 5:
         lamp.succeed("egrep 'curl.cainfo.*/etc/ssl/certs/ca-certificates.crt' result")
+        lamp.succeed("egrep 'MongoDB support.*enabled' result")
 
       if tideways_api_key:
         lamp.succeed("egrep 'tideways' result")

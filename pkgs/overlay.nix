@@ -127,6 +127,7 @@ in {
                 all.bcmath
                 all.imagick
                 all.memcached
+                all.mongodb
                 all.redis
               ]);
   lamp_php74 = super.php74.withExtensions ({ enabled, all }:
@@ -134,6 +135,7 @@ in {
                 all.bcmath
                 all.imagick
                 all.memcached
+                all.mongodb
                 all.redis
               ]);
   lamp_php80 = super.php80.withExtensions ({ enabled, all }:
@@ -141,6 +143,7 @@ in {
                 all.bcmath
                 all.imagick
                 all.memcached
+                all.mongodb
                 all.redis
               ]);
 
