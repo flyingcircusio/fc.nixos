@@ -156,7 +156,7 @@ in {
         certificateScheme = 3;
         enableImapSsl = true;
         enableManageSieve = true;
-        lmtpSaveToDetailMailbox = "no";
+        # lmtpSaveToDetailMailbox = "no";
         mailDirectory = vmailDir;
         mailboxes = {
           "Trash" = { auto = "create"; specialUse = "Trash"; };
